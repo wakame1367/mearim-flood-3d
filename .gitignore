@@ -1,0 +1,10 @@
+node_modules/
+dist/
+test-results/
+data/raw/
+.venv/
+__pycache__/
+*.pyc
+analysis/*.png
+analysis/reference/
+.DS_Store

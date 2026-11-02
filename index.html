@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mearim Flood 3D (local PoC) — Pedreiras / Trizidela do Vale</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="viewport"></div>
+    <div id="labels"></div>
+    <div id="loading">データ読込中…</div>
+
+    <aside id="panel">
+      <header>
+        <div class="kicker">Pedreiras · Trizidela do Vale · Rio Mearim</div>
+        <h1>Mearim 洪水 3D (ローカル再現 PoC)</h1>
+        <p class="sub">実DEM（30 m）と観測所水位から静的に浸水域を計算します。流速・到達時間・堤防/排水は再現しません。</p>
+      </header>
+
+      <section>
+        <label class="row" for="stage">
+          <span>Pedreiras II 観測所 水位 <small>(ANA 33281000, 量水標ゼロ基準)</small></span>
+          <b id="stageVal">–</b>
+        </label>
+        <input id="stage" type="range" min="0" max="12" step="0.01" value="7.46" />
+        <div class="presets" id="presets"></div>
+        <div class="kv">
+          <span>水面標高 @観測所 (DEM基準)</span><b id="wseVal">–</b>
+          <span>DEM取得時の水面からの上昇</span><b id="riseVal">–</b>
+        </div>
+        <div class="row tight">
+          <select id="eventSel"></select>
+          <button id="playBtn">▶ 観測ハイドログラフ再生</button>
+          <span id="eventDate" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="stats">
+        <div class="town" id="town1"></div>
+        <div class="town" id="town2"></div>
+      </section>
+
+      <section>
+        <canvas id="chart" width="360" height="170"></canvas>
+        <div id="orderNote" class="muted small"></div>
+      </section>
+
+      <details open>
+        <summary>浸水モデル</summary>
+        <div class="grid2">
+          <label>連結性<select id="model">
+            <option value="connected">河川から連結 (BFS/priority-flood)</option>
+            <option value="bathtub">単純閾値 (低い所すべて)</option>
+          </select></label>
+          <label>基準水面<select id="ref">
+            <option value="hand">HAND (排水先の河川水位)</option>
+            <option value="profile">河川縦断プロファイル (最近傍)</option>
+            <option value="flat">水平面 (観測所の水位で一定)</option>
+          </select></label>
+          <label>較正<select id="calMode">
+            <option value="record">2024年洪水記録で較正</option>
+            <option value="epoch">DEM取得期間の中央値水位</option>
+            <option value="manual">手動</option>
+          </select></label>
+          <label>DEM水面相当の水位 <b id="calVal">–</b>
+            <input id="calManual" type="range" min="0" max="8" step="0.01" value="4" />
+          </label>
+        </div>
+        <p class="muted small" id="calNote"></p>
+      </details>
+
+      <details open>
+        <summary>地形・表示</summary>
+        <div class="grid2">
+          <label>DEM<select id="dem"></select></label>
+          <label>解像度<select id="coarsen">
+            <option value="1">30 m (原解像度)</option>
+            <option value="2">60 m</option>
+            <option value="3">90 m</option>
+            <option value="4">120 m</option>
+          </select></label>
+          <label>高さ誇張 <b id="exagVal">–</b><input id="exag" type="range" min="1" max="20" step="0.5" value="6" /></label>
+          <label>配色<select id="colorMode">
+            <option value="elevation">標高 (段彩)</option>
+            <option value="hand">河川基準の比高 (HAND)</option>
+            <option value="arrival">浸水開始水位</option>
+            <option value="susceptibility">SGB洪水感受性 (2015)</option>
+          </select></label>
+          <label>等高線<select id="contour">
+            <option value="0">なし</option>
+            <option value="1" selected>1 m</option>
+            <option value="5">5 m</option>
+          </select></label>
+          <div class="checks">
+            <label><input type="checkbox" id="showBuildings" checked /> 建物</label>
+            <label><input type="checkbox" id="showRoads" checked /> 道路</label>
+            <label><input type="checkbox" id="showWater" checked /> 水面</label>
+            <label><input type="checkbox" id="showLabels" checked /> ラベル</label>
+          </div>
+        </div>
+        <div class="views">
+          視点:
+          <button data-view="overview">全体</button>
+          <button data-view="pedreiras">Pedreiras</button>
+          <button data-view="trizidela">Trizidela do Vale</button>
+          <button data-view="gauge">観測所</button>
+          <button data-view="profile">河川断面</button>
+        </div>
+      </details>
+
+      <details>
+        <summary>Flores ダム決壊シナリオ (未実装・評価のみ)</summary>
+        <p class="small">
+          元アプリでは「決壊後の経過時間」で水位を動かす仮想シナリオがあり、到達時間・上昇・ピークは
+          「破堤解析が出るまでの仮置き値」と明記されています。本PoCは流入ハイドログラフ・破堤パラメータ・
+          河道断面がないため、物理予測としては実装していません。必要データとアルゴリズムは
+          <code>docs/flood-model.md</code> を参照。
+        </p>
+      </details>
+
+      <details>
+        <summary>データ情報 / 性能</summary>
+        <div id="info" class="kv small"></div>
+      </details>
+
+      <footer class="small muted">
+        Elevation: Copernicus GLO-30 © DLR/Airbus (ESA/EU), FABDEM © Univ. Bristol (CC BY-NC-SA), SGB/CPRM 2015.
+        Roads/river © OpenStreetMap contributors (ODbL). Buildings: Overture Maps (Google Open Buildings, OSM; ODbL).
+        Gauge: ANA HidroWeb. 洪水記録: G1/O Imparcial 2024, Folha/BBC 2009.
+      </footer>
+    </aside>
+
+    <div id="pick" class="hidden"></div>
+    <div id="legend"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
