@@ -74,3 +74,9 @@ footer { border-top: 1px solid #243042; padding-top: 8px; }
   padding: 6px 10px; font-size: 11px; z-index: 10; max-width: 340px;
 }
 #legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 3px 0 8px; vertical-align: -1px; }
+
+/* simulation mode: hide Mearim-only controls */
+body.sim .mearim-only { display: none; }
+#simPanel input[type=range] { width: 100%; }
+#simTime { font-size: 18px; color: var(--accent); font-variant-numeric: tabular-nums; }
+#simName { font-weight: 600; }

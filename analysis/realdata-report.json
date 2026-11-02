@@ -121,7 +121,7 @@
     "coarsen": 1,
     "stageAtDem": 2.2
    },
-   "computeMs": 71,
+   "computeMs": 91,
    "totals": {
     "buildings": {
      "1": 13465,
@@ -317,7 +317,7 @@
     "coarsen": 1,
     "stageAtDem": 2.2
    },
-   "computeMs": 97,
+   "computeMs": 93,
    "totals": {
     "buildings": {
      "1": 13465,
@@ -513,7 +513,7 @@
     "coarsen": 1,
     "stageAtDem": 2.2
    },
-   "computeMs": 94,
+   "computeMs": 100,
    "totals": {
     "buildings": {
      "1": 13465,
@@ -709,7 +709,7 @@
     "coarsen": 1,
     "stageAtDem": 2.2
    },
-   "computeMs": 74,
+   "computeMs": 70,
    "totals": {
     "buildings": {
      "1": 13465,
@@ -905,7 +905,7 @@
     "coarsen": 2,
     "stageAtDem": 2.2
    },
-   "computeMs": 45,
+   "computeMs": 52,
    "totals": {
     "buildings": {
      "1": 13482,
@@ -1101,7 +1101,7 @@
     "coarsen": 3,
     "stageAtDem": 2.2
    },
-   "computeMs": 25,
+   "computeMs": 30,
    "totals": {
     "buildings": {
      "1": 13476,
@@ -1297,7 +1297,7 @@
     "coarsen": 1,
     "stageAtDem": 5.73
    },
-   "computeMs": 68,
+   "computeMs": 82,
    "totals": {
     "buildings": {
      "1": 13465,
@@ -1493,7 +1493,7 @@
     "coarsen": 1,
     "stageAtDem": 2.2
    },
-   "computeMs": 66,
+   "computeMs": 83,
    "totals": {
     "buildings": {
      "1": 13465,
@@ -1689,7 +1689,7 @@
     "coarsen": 1,
     "stageAtDem": 4.6
    },
-   "computeMs": 68,
+   "computeMs": 86,
    "totals": {
     "buildings": {
      "1": 13465,

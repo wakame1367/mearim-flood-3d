@@ -21,8 +21,25 @@ export interface StageWindow {
   n: number;
 }
 
+/** Precomputed 2D-model depth frames (manifest v2). */
+export interface SimScenario {
+  id: string;
+  type: 'simulation' | 'replay' | 'envelope';
+  name: string;
+  solver?: string;
+  dtSeconds: number;
+  timeBase: 'relative' | 'absolute';
+  unit: 'mm' | 'cm' | 'm';
+  maxDepth_m?: number;
+  frames: string[];
+  note?: string;
+}
+
 export interface Manifest {
   version: number;
+  region?: string;
+  name?: string;
+  scenarios?: SimScenario[];
   crs: string;
   cell: number;
   nx: number;
@@ -45,7 +62,7 @@ export interface Manifest {
     yAna: number;
     snapDistance: number;
     anaInventoryAltitude: number;
-  };
+  } | null;
   stage: {
     period: [string, string];
     all: { median: number; p95: number; max: number };

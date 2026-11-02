@@ -1,0 +1,82 @@
+{
+ "version": 2,
+ "region": "ea4",
+ "name": "EA benchmark Test 4 — floodplain point-source fill (LISFLOOD-FP)",
+ "crs": "local (test grid, metres)",
+ "cell": 5.0,
+ "nx": 200,
+ "ny": 400,
+ "originUTM": {
+  "x0": 0.0,
+  "y1": 2000.0
+ },
+ "centerUTM": {
+  "x": 500.0,
+  "y": 1000.0
+ },
+ "bboxLL": {
+  "west": 0.0,
+  "south": 0.0,
+  "east": 1000.0,
+  "north": 2000.0
+ },
+ "dems": {
+  "model": {
+   "file": "dem.f32",
+   "zrefProfile": "dem.f32",
+   "zrefHand": "dem.f32",
+   "zMin": 0.0,
+   "zMax": 0.0,
+   "riverZAtGauge": 0.0,
+   "riverDrop": 0.0,
+   "riverLength": 0.0,
+   "profile": {
+    "chain": [],
+    "raw": [],
+    "z": [],
+    "x": [],
+    "y": [],
+    "gaugeChain": 0
+   },
+   "handPercentiles": {}
+  }
+ },
+ "demLabels": {
+  "model": "EA Test4 DEM (5.0 m)"
+ },
+ "rasters": {
+  "channel": "channel.u8",
+  "drainage": "drainage.u8",
+  "town": "town.u8",
+  "susc": "susc.u8"
+ },
+ "towns": [],
+ "gauge": null,
+ "stage": null,
+ "scenarios": [
+  {
+   "id": "ea4-fv1",
+   "type": "simulation",
+   "name": "EA Test 4: 集水域への点源流入 (LISFLOOD-FP FV1 solver)",
+   "solver": "fv1",
+   "resolution_m": 5.0,
+   "dtSeconds": 3600,
+   "timeBase": "relative",
+   "unit": "mm",
+   "maxDepth_m": 0.52,
+   "frames": [
+    "frames/d_0000.u16",
+    "frames/d_0001.u16",
+    "frames/d_0002.u16",
+    "frames/d_0003.u16",
+    "frames/d_0004.u16",
+    "frames/d_0005.u16"
+   ],
+   "note": "Environment Agency 2D model benchmark Test 4 (Neelz & Pender 2013). Idealised floodplain; output from LISFLOOD-FP 8.0 (Zenodo 4661888). Frames are hourly solver snapshots; between frames the viewer interpolates visually (not a physical state)."
+  }
+ ],
+ "sources": {
+  "lisflood-fp": "Zenodo 10.5281/zenodo.4661888 (LISFLOOD-FP 8.0 simulation results)",
+  "benchmark": "Neelz & Pender 2013, Benchmarking 2D hydraulic models (UK Environment Agency)"
+ }
+}

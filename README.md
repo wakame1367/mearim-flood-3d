@@ -40,6 +40,14 @@ npm run dev        # http://127.0.0.1:5173/
 
 `public/data/`（約 6 MB）に前処理済みデータが入っているため、データ取得なしで動きます。
 
+### シミュレーション・シナリオ（別リージョン）
+
+ヘッダの「地域」セレクトまたは `?region=ea4` で、外部 2D 水理モデルの出力を時系列再生するモードに切り替わります。
+
+- **EA Test 4**（`public/regions/ea4/`、約 1.3 MB）: LISFLOOD-FP 8.0 の公式ベンチマーク結果（Zenodo 4661888）。200×400 セル @5 m、1 h 間隔 6 フレームの水深を GPU 補間つきタイムラインで再生します
+- 変換: `python3 scripts/pack_ea4.py`（`data/raw/lisflood-eden/ea4/` に `ea4.zip` 展開済みのこと）
+- 詳細・先行事例調査: `docs/simulation-poc.md`
+
 ## データの再取得（オプション）
 
 すべて公開・無料・APIキー不要のソースです。

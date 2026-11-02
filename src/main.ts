@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { gaugeZeroElevation, wseAtGauge } from './core/calibration';
-import { fetchIO, loadDataset, type Dataset } from './core/dataset';
+import { fetchIO, loadDataset, type Dataset, type DataIO, type SimScenario } from './core/dataset';
 import type { FloodModel } from './core/flood';
 import { cellIndexAt } from './core/grid';
 import { DEFAULT_THRESHOLDS } from './core/impact';
 import { calibrateToRecord, FLOOD_RECORDS } from './core/records';
 import { defaultStageAtDem, Scenario, type RefSurface } from './core/scenario';
 import { buildAssets, type AssetsBundle } from './render/assets';
+import { buildSimWater, type SimWater } from './render/simwater';
 import { buildTerrain, COLOR_MODES, type ColorMode, type TerrainBundle, type TerrainUniforms } from './render/terrain';
 import { drawImpactChart } from './ui/chart';
 
@@ -65,6 +66,15 @@ let scn: Scenario;
 let terrain: TerrainBundle | null = null;
 let assets: AssetsBundle | null = null;
 let rebuilds = 0;
+let io: DataIO;
+
+// --- simulation-scenario state (manifest v2, ?region=...) ---
+let sim: SimScenario | null = null;
+let simWater: SimWater | null = null;
+let simT = 0; // continuous position in frame units
+let simSpeed = 1; // 1x = one model hour per wall-clock second
+let simPlaying = false;
+const frameCache = new Map<number, Float32Array>();
 
 // ------------------------------------------------------------------ scenario
 function computeCalibration(): number {
@@ -74,6 +84,7 @@ function computeCalibration(): number {
 }
 
 function rebuildScenario() {
+  if (sim) return; // simulation regions keep their fixed grid/DEM
   scn = new Scenario(ds, {
     dem: state.dem,
     ref: state.ref,
@@ -103,19 +114,22 @@ function rebuildScenario() {
 }
 
 function applyExaggeration() {
-  if (!terrain || !assets) return;
+  if (!terrain) return;
   terrain.setExaggeration(state.exag);
-  assets.setExaggeration(state.exag, terrain.heightAt);
+  assets?.setExaggeration(state.exag, terrain.heightAt);
   $('exagVal').textContent = `${state.exag}×`;
   placeLabels();
 }
 
 function applyVisibility() {
-  if (!terrain || !assets) return;
-  assets.buildings.visible = $<HTMLInputElement>('showBuildings').checked;
-  assets.roads.visible = $<HTMLInputElement>('showRoads').checked;
-  terrain.water.visible = $<HTMLInputElement>('showWater').checked;
-  uniforms.uShowFlood.value = terrain.water.visible ? 1 : 0;
+  if (!terrain) return;
+  if (assets) {
+    assets.buildings.visible = $<HTMLInputElement>('showBuildings').checked;
+    assets.roads.visible = $<HTMLInputElement>('showRoads').checked;
+  }
+  const w = simWater ? simWater.mesh : terrain.water;
+  w.visible = $<HTMLInputElement>('showWater').checked;
+  uniforms.uShowFlood.value = w.visible ? 1 : 0;
   $('labels').style.display = $<HTMLInputElement>('showLabels').checked ? '' : 'none';
 }
 
@@ -139,7 +153,7 @@ function updateCalibration() {
   };
   $('calNote').textContent =
     `${notes[state.calMode]} → 量水標ゼロの推定標高 ${fmt(z0)} m (DEM鉛直基準)。` +
-    ` 参考: ANA台帳の標高 ${m.gauge.anaInventoryAltitude} m は基準・精度不明のため未使用。`;
+    ` 参考: ANA台帳の標高 ${m.gauge?.anaInventoryAltitude ?? '—'} m は基準・精度不明のため未使用。`;
   updateStage();
   updateInfo();
 }
@@ -183,6 +197,21 @@ function updateStage() {
 
 function updateInfo() {
   const m = ds.manifest;
+  if (sim) {
+    const g = ds.grid;
+    const rows: [string, string][] = [
+      ['シナリオ', sim.name],
+      ['ソルバー', sim.solver ?? '—'],
+      ['グリッド', `${g.nx} × ${g.ny} セル, ${g.cell} m (${((g.nx * g.cell) / 1000).toFixed(1)} × ${((g.ny * g.cell) / 1000).toFixed(1)} km)`],
+      ['座標系', m.crs],
+      ['フレーム', `${sim.frames.length} 枚 × ${sim.dtSeconds / 3600} h 間隔 (${sim.unit})`],
+      ['最大水深 (全フレーム)', `${fmt(sim.maxDepth_m ?? 0)} m`],
+      ['描画三角形', `${renderer.info.render.triangles.toLocaleString()}`],
+      ['FPS', `<span id="fps">–</span>`],
+    ];
+    $('info').innerHTML = rows.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('');
+    return;
+  }
   const dm = m.dems[state.dem];
   const g = scn.grid;
   const srcCount = ds.buildings.reduce<Record<string, number>>((a, b) => ((a[b.s] = (a[b.s] ?? 0) + 1), a), {});
@@ -193,7 +222,7 @@ function updateInfo() {
     ['標高範囲', `${fmt(dm.zMin, 1)} – ${fmt(dm.zMax, 1)} m`],
     ['観測所での河川水面 (DEM)', `${fmt(dm.riverZAtGauge)} m`],
     ['河川縦断勾配 (窓内)', `${fmt(dm.riverDrop)} m / ${fmt(dm.riverLength / 1000, 1)} km`],
-    ['観測所位置の補正', `ANA座標→河道中心線へ ${fmt(m.gauge.snapDistance, 0)} m`],
+    ['観測所位置の補正', `ANA座標→河道中心線へ ${fmt(m.gauge!.snapDistance, 0)} m`],
     ['建物', `${ds.buildings.length.toLocaleString()} (Google ${srcCount.G ?? 0}, OSM ${srcCount.O ?? 0})`],
     ['道路区間', `${scn.roads.count.toLocaleString()} 区間 (≤${g.cell / 2} m)`],
     ['シナリオ計算 (CPU)', `${scn.computeMs.toFixed(0)} ms`],
@@ -204,6 +233,13 @@ function updateInfo() {
 }
 
 function updateLegend() {
+  if (sim) {
+    $('legend').innerHTML =
+      `<div>地形: 段彩 ${fmt(ds.manifest.dems[Object.keys(ds.dems)[0]].zMin, 0)}→${fmt(ds.manifest.dems[Object.keys(ds.dems)[0]].zMax, 0)} m</div>` +
+      `<div>水深: <span class="sw" style="background:#8cd9f2"></span>浅<span class="sw" style="background:#0d3880"></span>深</div>` +
+      `<div class="muted small">LISFLOOD-FP ソルバー出力の再生。フレーム間は視覚補間（物理状態ではない）。</div>`;
+    return;
+  }
   const mode = state.colorMode;
   const sw = (c: string, t: string) => `<span class="sw" style="background:${c}"></span>${t}`;
   const terrainLegend: Record<ColorMode, string> = {
@@ -243,7 +279,7 @@ function makeLabels() {
     if (p.k === 'town') add(p.n ?? '', p.n === 'Pedreiras' ? 'town1' : 'town2', p.x, p.y);
     if (p.k === 'hospital') add(`✚ ${p.n ?? 'hospital'}`, 'poi', p.x, p.y);
   }
-  add(`観測所 ${ds.manifest.gauge.name}`, 'gauge', ds.manifest.gauge.x, ds.manifest.gauge.y);
+  if (ds.manifest.gauge) add(`観測所 ${ds.manifest.gauge.name}`, 'gauge', ds.manifest.gauge.x, ds.manifest.gauge.y);
   placeLabels();
 }
 
@@ -271,7 +307,8 @@ function setView(name: string) {
   const at = (x: number, y: number) => new THREE.Vector3(x, terrain!.heightAt(x, y), -y);
   let target: THREE.Vector3;
   let offset: THREE.Vector3;
-  const g = ds.manifest.gauge;
+  const g = ds.manifest.gauge!;
+  const g0 = sim ? ds.grid : null;
   switch (name) {
     case 'pedreiras': {
       const p = poi('Pedreiras');
@@ -294,8 +331,15 @@ function setView(name: string) {
       offset = new THREE.Vector3(0, 120 + state.exag * 15, 2600);
       break;
     default:
-      target = new THREE.Vector3(0, 100, 0);
-      offset = new THREE.Vector3(-1500, 5400, 6800);
+      if (g0) {
+        const w = g0.nx * g0.cell;
+        const h = g0.ny * g0.cell;
+        target = new THREE.Vector3(0, 50, 0);
+        offset = new THREE.Vector3(-w * 0.9, Math.max(w, h) * 0.95, h * 0.9);
+      } else {
+        target = new THREE.Vector3(0, 100, 0);
+        offset = new THREE.Vector3(-1500, 5400, 6800);
+      }
   }
   camTween = { from: camera.position.clone(), to: target.clone().add(offset), tFrom: controls.target.clone(), tTo: target, t0: performance.now() };
 }
@@ -313,8 +357,20 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (!hit) return box.classList.add('hidden');
   const x = hit.point.x;
   const y = -hit.point.z;
-  const k = cellIndexAt(scn.grid, x, y);
+  const g = sim ? ds.grid : scn.grid;
+  const k = cellIndexAt(g, x, y);
   if (k < 0) return;
+  if (sim && simWater) {
+    const z = ds.dems[Object.keys(ds.dems)[0]].z;
+    const d = simWater.depthAt(x, y);
+    box.classList.remove('hidden');
+    box.innerHTML = `<b>地点情報</b> <span class="muted">(${x.toFixed(0)}, ${y.toFixed(0)}) m</span>
+      <div class="kv small">
+      <span>地盤標高 (DEM)</span><b>${fmt(z[k])} m</b>
+      <span>現在の水深</span><b>${d > 0.005 ? fmt(d) + ' m' : '—'}</b>
+      <span>水面標高</span><b>${d > 0.005 ? fmt(z[k] + d) + ' m' : '—'}</b></div>`;
+    return;
+  }
   const rise = scn.rise(state.stage);
   const wet = scn.arrival[k] < rise;
   const susc = ['対象外', '低', '中', '高'][scn.susc[k]] ?? '範囲外';
@@ -333,6 +389,23 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 // ------------------------------------------------------------------ UI wiring
 function bindUI() {
   const m = ds.manifest;
+  const demSel = $<HTMLSelectElement>('dem');
+  demSel.innerHTML = Object.keys(m.dems)
+    .map((k) => `<option value="${k}">${m.demLabels[k] ?? k}</option>`)
+    .join('');
+  const onSel = (id: string, fn: (v: string) => void) => $<HTMLSelectElement>(id).addEventListener('change', (e) => fn((e.target as HTMLSelectElement).value));
+  onSel('contour', (v) => (uniforms.uContour.value = state.contour = Number(v)));
+  $<HTMLInputElement>('exag').addEventListener('input', (e) => {
+    state.exag = Number((e.target as HTMLInputElement).value);
+    applyExaggeration();
+  });
+  for (const id of ['showBuildings', 'showRoads', 'showWater', 'showLabels']) $(id).addEventListener('change', applyVisibility);
+  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view!)));
+  if (sim) {
+    onSel('dem', () => rebuildScenario());
+    bindSimUI();
+    return;
+  }
   const am = m.stage?.annual_max ?? {};
   const presets: [string, number][] = [
     [`平水 中央値`, m.stage?.all.median ?? 2.44],
@@ -352,9 +425,6 @@ function bindUI() {
     state.stage = Number((e.target as HTMLInputElement).value);
     updateStage();
   });
-  const demSel = $<HTMLSelectElement>('dem');
-  demSel.innerHTML = Object.keys(m.dems).map((k) => `<option value="${k}">${k === 'cop30' ? 'Copernicus GLO-30 (DSM)' : k === 'fabdem' ? 'FABDEM (bare-earth)' : 'SGB/Topodata (SRTM)'}</option>`).join('');
-  const onSel = (id: string, fn: (v: string) => void) => $<HTMLSelectElement>(id).addEventListener('change', (e) => fn((e.target as HTMLSelectElement).value));
   onSel('dem', (v) => ((state.dem = v), rebuildScenario(), updateLegend()));
   onSel('coarsen', (v) => ((state.coarsen = Number(v)), rebuildScenario()));
   onSel('model', (v) => ((state.model = v as FloodModel), rebuildScenario()));
@@ -365,17 +435,10 @@ function bindUI() {
     uniforms.uMode.value = COLOR_MODES.indexOf(state.colorMode);
     updateLegend();
   });
-  onSel('contour', (v) => (uniforms.uContour.value = state.contour = Number(v)));
   $<HTMLInputElement>('calManual').addEventListener('input', (e) => {
     state.calManual = Number((e.target as HTMLInputElement).value);
     updateCalibration();
   });
-  $<HTMLInputElement>('exag').addEventListener('input', (e) => {
-    state.exag = Number((e.target as HTMLInputElement).value);
-    applyExaggeration();
-  });
-  for (const id of ['showBuildings', 'showRoads', 'showWater', 'showLabels']) $(id).addEventListener('change', applyVisibility);
-  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view!)));
 
   // observed hydrograph replay (ANA daily stages through the static model)
   const events = m.stage?.events ?? {};
@@ -406,13 +469,126 @@ function bindUI() {
   });
 }
 
+// ------------------------------------------------------------------ simulation scenario
+function unitScale(u: SimScenario['unit']) {
+  return u === 'mm' ? 0.001 : u === 'cm' ? 0.01 : 1;
+}
+
+async function loadFrame(i: number): Promise<Float32Array> {
+  const hit = frameCache.get(i);
+  if (hit) return hit;
+  const raw = new Uint16Array(await io.bin(sim!.frames[i]));
+  const scale = unitScale(sim!.unit);
+  if (raw.length !== ds.grid.nx * ds.grid.ny) throw new Error(`${sim!.frames[i]}: expected ${ds.grid.nx * ds.grid.ny} cells`);
+  const f = Float32Array.from(raw, (v) => v * scale);
+  frameCache.set(i, f);
+  return f;
+}
+
+let simApplySeq = 0; // ignore stale async applies after fast scrubbing
+async function applySimTime() {
+  if (!sim || !simWater) return;
+  const seq = ++simApplySeq;
+  const last = sim.frames.length - 1;
+  simT = Math.min(Math.max(simT, 0), last);
+  const i0 = Math.min(Math.floor(simT), Math.max(last - 1, 0));
+  const i1 = Math.min(i0 + 1, last);
+  const mix = i0 === i1 ? 0 : Math.min(Math.max(simT - i0, 0), 1);
+  const [a, b] = await Promise.all([loadFrame(i0), loadFrame(i1)]);
+  if (seq !== simApplySeq) return;
+  simWater.setFrames(a, b, mix);
+  let wet = 0;
+  let mx = 0;
+  for (let k = 0; k < a.length; k++) {
+    const d = a[k] * (1 - mix) + b[k] * mix;
+    if (d > 0.005) {
+      wet++;
+      if (d > mx) mx = d;
+    }
+  }
+  $('simArea').textContent = `${fmt((wet * ds.grid.cell * ds.grid.cell) / 1e6)} km²`;
+  $('simMaxDepth').textContent = `${fmt(mx)} m`;
+  const h = (simT * sim.dtSeconds) / 3600;
+  $('simTime').textContent = `T+${h.toFixed(2)} h`;
+  $<HTMLInputElement>('simScrub').value = String(simT);
+}
+
+function bindSimUI() {
+  const scrub = $<HTMLInputElement>('simScrub');
+  scrub.max = String(sim!.frames.length - 1);
+  $('simName').textContent = sim!.name;
+  $('simNote').textContent = sim!.note ?? '';
+  scrub.addEventListener('input', () => {
+    simT = Number(scrub.value);
+    void applySimTime();
+  });
+  $('simPlay').addEventListener('click', () => {
+    simPlaying = !simPlaying;
+    if (simPlaying && simT >= sim!.frames.length - 1) simT = 0;
+    $('simPlay').textContent = simPlaying ? '■ 停止' : '▶ 再生';
+  });
+  $<HTMLSelectElement>('simSpeed').addEventListener('change', (e) => {
+    simSpeed = Number((e.target as HTMLSelectElement).value);
+  });
+}
+
+function setupSim() {
+  document.body.classList.add('sim');
+  document.title = `${ds.manifest.name ?? 'simulation'} — flood viewer`;
+  document.querySelector('.kicker')!.textContent = 'simulation scenario · precomputed model output';
+  $('appTitle').textContent = '水理モデル出力 3Dリプレイ (PoC)';
+  $('appSub').textContent = ds.manifest.name ?? '';
+  $('simPanel').hidden = false;
+  const demKey = Object.keys(ds.dems)[0];
+  const z = ds.dems[demKey].z;
+  const n = ds.grid.nx * ds.grid.ny;
+  const zeros = new Float32Array(n);
+  // minimal Scenario-shaped view: terrain renders, water is driven by frame depth instead
+  scn = {
+    grid: ds.grid,
+    z,
+    zref: z,
+    hRel: zeros,
+    arrival: new Float32Array(n).fill(1e9),
+    susc: ds.susc,
+    channel: ds.channel,
+    town: ds.town,
+  } as unknown as Scenario;
+  terrain = buildTerrain(scn, uniforms);
+  scene.add(terrain.terrain, terrain.skirt);
+  simWater = buildSimWater(ds.grid, z, uniforms, sim!.maxDepth_m ?? 4);
+  scene.add(simWater.mesh);
+  const dm = ds.manifest.dems[demKey];
+  uniforms.uZMin.value = dm.zMin;
+  uniforms.uZMax.value = dm.zMax;
+  uniforms.uZBase.value = Math.floor(dm.zMin) - 2;
+  uniforms.uShowFlood.value = 0;
+  state.exag = Math.max(2, Math.min(8, Math.round(400 / Math.max(dm.zMax - dm.zMin, 1))));
+  applyExaggeration();
+  applyVisibility();
+  rebuilds++;
+  void applySimTime();
+}
+
 // ------------------------------------------------------------------ loop
 let frames = 0;
 let lastFps = performance.now();
+let prevT = 0;
 let fps = 0;
 function animate(t: number) {
   requestAnimationFrame(animate);
   uniforms.uTime.value = t / 1000;
+  if (simPlaying && sim) {
+    const dt = Math.min(Math.max((t - prevT) / 1000, 0), 0.2);
+    simT += dt * simSpeed;
+    if (simT >= sim.frames.length - 1) {
+      simT = sim.frames.length - 1;
+      simPlaying = false;
+      $('simPlay').textContent = '▶ 再生';
+    }
+    void applySimTime();
+  }
+  prevT = t;
   if (camTween) {
     const k = Math.min(1, (t - camTween.t0) / 900);
     const e = k * k * (3 - 2 * k);
@@ -440,17 +616,44 @@ window.addEventListener('resize', () => {
 });
 
 // ------------------------------------------------------------------ boot
+const REGIONS: Record<string, { name: string; url: string }> = {
+  mearim: { name: 'Rio Mearim (Pedreiras / Trizidela do Vale)', url: '' },
+  ea4: { name: 'EA Test 4 — LISFLOOD-FP 出力', url: 'regions/ea4/' },
+};
+
 async function main() {
-  ds = await loadDataset(fetchIO());
+  const regionId = new URLSearchParams(location.search).get('region') ?? 'mearim';
+  const region = REGIONS[regionId] ?? REGIONS.mearim;
+  io = fetchIO(region.url ? `${import.meta.env?.BASE_URL ?? '/'}${region.url}` : undefined);
+  ds = await loadDataset(io);
+  sim = ds.manifest.scenarios?.find((s) => s.type === 'simulation') ?? null;
+  const sel = $<HTMLSelectElement>('regionSel');
+  sel.innerHTML = Object.entries(REGIONS).map(([id, r]) => `<option value="${id}">${r.name}</option>`).join('');
+  sel.value = REGIONS[regionId] ? regionId : 'mearim';
+  sel.addEventListener('change', () => {
+    const id = sel.value;
+    location.href = id === 'mearim' ? location.pathname : `?region=${id}`;
+  });
   uniforms.uZBase.value = Math.floor(Math.min(...Object.values(ds.manifest.dems).map((d) => d.zMin))) - 2;
   bindUI();
-  rebuildScenario();
+  if (sim) {
+    setupSim();
+  } else {
+    rebuildScenario();
+  }
   makeLabels();
   updateLegend();
   setView('overview');
   camTween = null;
-  camera.position.set(-1500, 5400, 6800);
-  controls.target.set(0, 100, 0);
+  if (sim) {
+    const w = ds.grid.nx * ds.grid.cell;
+    const h = ds.grid.ny * ds.grid.cell;
+    camera.position.set(-w * 0.9, Math.max(w, h) * 0.95, h * 0.9);
+    controls.target.set(0, 50, 0);
+  } else {
+    camera.position.set(-1500, 5400, 6800);
+    controls.target.set(0, 100, 0);
+  }
   $('loading').classList.add('done');
   requestAnimationFrame(animate);
   setTimeout(updateInfo, 500);
@@ -466,11 +669,21 @@ async function main() {
         return fps;
       },
       setStage(v: number) {
+        if (sim) return;
         state.stage = v;
         updateStage();
       },
+      get simT() {
+        return simT;
+      },
+      simFrames: () => sim?.frames.length ?? 0,
+      setSimT(v: number) {
+        simT = v;
+        return applySimTime();
+      },
       setView,
       stats() {
+        if (sim) return { sim: true, simT, frames: sim.frames.length };
         const r = scn.rise(state.stage);
         return { rise: r, stageAtDem: scn.calibration.stageAtDem, uRise: uniforms.uRise.value, t1: scn.impact.at(r, 1), t2: scn.impact.at(r, 2) };
       },

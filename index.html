@@ -14,11 +14,36 @@
     <aside id="panel">
       <header>
         <div class="kicker">Pedreiras · Trizidela do Vale · Rio Mearim</div>
-        <h1>Mearim 洪水 3D (ローカル再現 PoC)</h1>
-        <p class="sub">実DEM（30 m）と観測所水位から静的に浸水域を計算します。流速・到達時間・堤防/排水は再現しません。</p>
+        <h1 id="appTitle">Mearim 洪水 3D (ローカル再現 PoC)</h1>
+        <p class="sub" id="appSub">実DEM（30 m）と観測所水位から静的に浸水域を計算します。流速・到達時間・堤防/排水は再現しません。</p>
+        <div class="row tight"><label>地域 <select id="regionSel"></select></label></div>
       </header>
 
-      <section>
+      <section id="simPanel" hidden>
+        <label class="row">
+          <span id="simName">–</span>
+          <b id="simTime">–</b>
+        </label>
+        <input id="simScrub" type="range" min="0" max="5" step="0.01" value="0" />
+        <div class="row tight">
+          <button id="simPlay">▶ 再生</button>
+          <select id="simSpeed">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+          </select>
+          <span class="muted small">間は視覚補間</span>
+        </div>
+        <div class="kv">
+          <span>浸水面積</span><b id="simArea">–</b>
+          <span>最大水深</span><b id="simMaxDepth">–</b>
+        </div>
+        <p class="muted small" id="simNote"></p>
+      </section>
+
+      <section class="mearim-only">
         <label class="row" for="stage">
           <span>Pedreiras II 観測所 水位 <small>(ANA 33281000, 量水標ゼロ基準)</small></span>
           <b id="stageVal">–</b>
@@ -36,17 +61,17 @@
         </div>
       </section>
 
-      <section class="stats">
+      <section class="stats mearim-only">
         <div class="town" id="town1"></div>
         <div class="town" id="town2"></div>
       </section>
 
-      <section>
+      <section class="mearim-only">
         <canvas id="chart" width="360" height="170"></canvas>
         <div id="orderNote" class="muted small"></div>
       </section>
 
-      <details open>
+      <details open class="mearim-only">
         <summary>浸水モデル</summary>
         <div class="grid2">
           <label>連結性<select id="model">
@@ -74,14 +99,14 @@
         <summary>地形・表示</summary>
         <div class="grid2">
           <label>DEM<select id="dem"></select></label>
-          <label>解像度<select id="coarsen">
+          <label class="mearim-only">解像度<select id="coarsen">
             <option value="1">30 m (原解像度)</option>
             <option value="2">60 m</option>
             <option value="3">90 m</option>
             <option value="4">120 m</option>
           </select></label>
           <label>高さ誇張 <b id="exagVal">–</b><input id="exag" type="range" min="1" max="20" step="0.5" value="6" /></label>
-          <label>配色<select id="colorMode">
+          <label class="mearim-only">配色<select id="colorMode">
             <option value="elevation">標高 (段彩)</option>
             <option value="hand">河川基準の比高 (HAND)</option>
             <option value="arrival">浸水開始水位</option>
@@ -93,8 +118,8 @@
             <option value="5">5 m</option>
           </select></label>
           <div class="checks">
-            <label><input type="checkbox" id="showBuildings" checked /> 建物</label>
-            <label><input type="checkbox" id="showRoads" checked /> 道路</label>
+            <label class="mearim-only"><input type="checkbox" id="showBuildings" checked /> 建物</label>
+            <label class="mearim-only"><input type="checkbox" id="showRoads" checked /> 道路</label>
             <label><input type="checkbox" id="showWater" checked /> 水面</label>
             <label><input type="checkbox" id="showLabels" checked /> ラベル</label>
           </div>
@@ -102,14 +127,14 @@
         <div class="views">
           視点:
           <button data-view="overview">全体</button>
-          <button data-view="pedreiras">Pedreiras</button>
-          <button data-view="trizidela">Trizidela do Vale</button>
-          <button data-view="gauge">観測所</button>
-          <button data-view="profile">河川断面</button>
+          <button data-view="pedreiras" class="mearim-only">Pedreiras</button>
+          <button data-view="trizidela" class="mearim-only">Trizidela do Vale</button>
+          <button data-view="gauge" class="mearim-only">観測所</button>
+          <button data-view="profile" class="mearim-only">河川断面</button>
         </div>
       </details>
 
-      <details>
+      <details class="mearim-only">
         <summary>Flores ダム決壊シナリオ (未実装・評価のみ)</summary>
         <p class="small">
           元アプリでは「決壊後の経過時間」で水位を動かす仮想シナリオがあり、到達時間・上昇・ピークは
@@ -124,7 +149,7 @@
         <div id="info" class="kv small"></div>
       </details>
 
-      <footer class="small muted">
+      <footer class="small muted mearim-only">
         Elevation: Copernicus GLO-30 © DLR/Airbus (ESA/EU), FABDEM © Univ. Bristol (CC BY-NC-SA), SGB/CPRM 2015.
         Roads/river © OpenStreetMap contributors (ODbL). Buildings: Overture Maps (Google Open Buildings, OSM; ODbL).
         Gauge: ANA HidroWeb. 洪水記録: G1/O Imparcial 2024, Folha/BBC 2009.
